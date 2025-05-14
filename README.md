@@ -52,7 +52,13 @@ git clone https://github.com/slackeddoodler/Bridging-Data-with-Workflow-Orchestr
 cd Bridging-Data-with-Workflow-Orchestration--NYC-Taxi-Pipeline-Using-Kestra-DuckDB
 ```
 
-### 2. Start PostgreSQL and Kestra
+### 2. Create a Docker Network
+
+```
+docker network create kestras-net
+```
+
+### 3. Start PostgreSQL and Kestra
 
 Navigate to the appropriate folder and run the following commands to start PostgreSQL and Kestra:
 
@@ -70,7 +76,7 @@ cd kestra
 docker-compose up -d
 ```
 
-### 3. Access Kestra UI
+### 4. Access Kestra UI
 
 Once both services are running, open your browser and navigate to:
 
