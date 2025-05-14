@@ -1,0 +1,156 @@
+id: postgres_taxi
+namespace: pipeline
+
+inputs:
+  - id: taxi
+    type: SELECT
+    displayName: Select the taxi type
+    values: ['yellow', 'green']
+    defaults: 'green'
+
+  - id: year
+    type: SELECT
+    displayName: Select the year
+    values: ['2019', '2020', '2021', '2022', '2023', '2024']
+    defaults: '2019'
+
+  - id: month
+    type: SELECT
+    displayName: Select the month
+    values: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12',]
+    defaults: '01'
+
+variables:
+  file: "{{inputs.taxi}}_tripdata_{{inputs.year}}-{{inputs.month}}.parquet"
+  staging_table: "public.{{inputs.taxi}}_tripdata_staging"
+  table: "public.{{inputs.taxi}}_tripdata"
+  url: "https://d37ci6vzurychx.cloudfront.net/trip-data/{{inputs.taxi}}_tripdata_{{inputs.year}}-{{inputs.month}}.parquet"
+
+tasks:
+  - id: set_label
+    type: io.kestra.plugin.core.execution.Labels
+    labels:
+      file: "{{render(vars.file)}}"
+      taxi: "{{inputs.taxi}}"
+
+  - id: if_yellow_taxi
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{inputs.taxi == 'yellow'}}"
+    then:
+      - id: yellow_create_staging_table
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: 'jdbc:duckdb:'
+        sql: |-
+          
+          ATTACH 'dbname=project user=kestra password=kestra host=postgres-db port=5432' as pg (TYPE postgres);
+          
+          CREATE OR REPLACE TABLE pg.{{render(vars.staging_table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            );
+
+      - id: yellow_update_unique_id_and_filename
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: 'jdbc:duckdb:'
+        sql: |-
+
+          ATTACH 'dbname=project user=kestra password=kestra host=postgres-db port=5432' as pg (TYPE postgres);
+          
+          UPDATE pg.{{render(vars.staging_table)}}
+          SET 
+            unique_row_id = md5(
+              COALESCE(CAST(VendorID AS text), '') ||
+              COALESCE(CAST(tpep_pickup_datetime AS text), '') || 
+              COALESCE(CAST(tpep_dropoff_datetime AS text), '') || 
+              COALESCE(CAST(PULocationID AS text), '') || 
+              COALESCE(CAST(DOLocationID AS text), '') || 
+              COALESCE(CAST(fare_amount AS text), '') || 
+              COALESCE(CAST(trip_distance AS text), '')      
+            ),
+            filename = '{{render(vars.file)}}';
+
+      - id: yellow_merge_data
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: 'jdbc:duckdb:'
+        sql: |-
+        
+          ATTACH 'dbname=project user=kestra password=kestra host=postgres-db port=5432' as pg (TYPE postgres);
+
+          CREATE TABLE IF NOT EXISTS pg.{{render(vars.table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            ) LIMIT 0;
+
+          INSERT INTO pg.{{render(vars.table)}}
+          SELECT s.*
+          FROM pg.{{render(vars.staging_table)}} s
+          LEFT JOIN pg.{{render(vars.table)}} t
+          ON s.unique_row_id = t.unique_row_id
+          WHERE t.unique_row_id IS NULL;
+ 
+  - id: if_green_taxi
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{inputs.taxi == 'green'}}"
+    then:
+      - id: green_create_staging_table
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: 'jdbc:duckdb:'
+        sql: |-
+
+          ATTACH 'dbname=project user=kestra password=kestra host=postgres-db port=5432' as pg (TYPE postgres);
+          
+          CREATE OR REPLACE TABLE pg.{{render(vars.staging_table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            );
+
+      - id: green_update_unique_id_and_filename
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: 'jdbc:duckdb:'
+        sql: |-
+
+          ATTACH 'dbname=project user=kestra password=kestra host=postgres-db port=5432' as pg (TYPE postgres);
+          
+          UPDATE pg.{{render(vars.staging_table)}}
+          SET 
+            unique_row_id = md5(
+              COALESCE(CAST(VendorID AS text), '') ||
+              COALESCE(CAST(lpep_pickup_datetime AS text), '') || 
+              COALESCE(CAST(lpep_dropoff_datetime AS text), '') || 
+              COALESCE(CAST(PULocationID AS text), '') || 
+              COALESCE(CAST(DOLocationID AS text), '') || 
+              COALESCE(CAST(fare_amount AS text), '') || 
+              COALESCE(CAST(trip_distance AS text), '')      
+            ),
+            filename = '{{render(vars.file)}}';
+
+      - id: green_merge_data
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: 'jdbc:duckdb:'
+        sql: |-
+        
+          ATTACH 'dbname=project user=kestra password=kestra host=postgres-db port=5432' as pg (TYPE postgres);
+
+          CREATE TABLE IF NOT EXISTS pg.{{render(vars.table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            ) LIMIT 0;
+
+          INSERT INTO pg.{{render(vars.table)}}
+          SELECT s.*
+          FROM pg.{{render(vars.staging_table)}} s
+          LEFT JOIN pg.{{render(vars.table)}} t
+          ON s.unique_row_id = t.unique_row_id
+          WHERE t.unique_row_id IS NULL;
