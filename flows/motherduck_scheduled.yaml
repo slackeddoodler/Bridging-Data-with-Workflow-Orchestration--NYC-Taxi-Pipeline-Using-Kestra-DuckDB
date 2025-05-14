@@ -1,0 +1,147 @@
+id: motherduck_scheduled
+namespace: pipeline
+
+concurrency:
+  limit: 1
+
+inputs:
+  - id: taxi
+    type: SELECT
+    displayName: Select the taxi type
+    values: ['yellow', 'green']
+    defaults: 'green'
+
+variables:
+  file: "{{inputs.taxi}}_tripdata_{{trigger.date | date('yyyy-MM')}}.parquet"
+  staging_table: "{{inputs.taxi}}_tripdata_staging"
+  table: "{{inputs.taxi}}_tripdata"
+  url: "https://d37ci6vzurychx.cloudfront.net/trip-data/{{inputs.taxi}}_tripdata_{{trigger.date | date('yyyy-MM')}}.parquet"
+
+tasks:
+  - id: set_label
+    type: io.kestra.plugin.core.execution.Labels
+    labels:
+      file: "{{render(vars.file)}}"
+      taxi: "{{inputs.taxi}}"
+
+  - id: if_yellow_taxi
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{inputs.taxi == 'yellow'}}"
+    then:
+      - id: yellow_create_staging_table
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+        sql: |-
+        
+          CREATE OR REPLACE TABLE {{render(vars.staging_table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            );
+
+      - id: yellow_update_unique_id_and_filename
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+        sql: |-
+          
+          UPDATE {{render(vars.staging_table)}}
+          SET 
+            unique_row_id = md5(
+              COALESCE(CAST(VendorID AS text), '') ||
+              COALESCE(CAST(tpep_pickup_datetime AS text), '') || 
+              COALESCE(CAST(tpep_dropoff_datetime AS text), '') || 
+              COALESCE(CAST(PULocationID AS text), '') || 
+              COALESCE(CAST(DOLocationID AS text), '') || 
+              COALESCE(CAST(fare_amount AS text), '') || 
+              COALESCE(CAST(trip_distance AS text), '')      
+            ),
+            filename = '{{render(vars.file)}}';
+
+      - id: yellow_merge_data
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+        sql: |-
+
+          CREATE TABLE IF NOT EXISTS {{render(vars.table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            ) LIMIT 0;
+
+          INSERT INTO {{render(vars.table)}}
+          SELECT s.*
+          FROM {{render(vars.staging_table)}} s
+          LEFT JOIN {{render(vars.table)}} t
+          ON s.unique_row_id = t.unique_row_id
+          WHERE t.unique_row_id IS NULL;
+ 
+  - id: if_green_taxi
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{inputs.taxi == 'green'}}"
+    then:
+      - id: green_create_staging_table
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+        sql: |-
+          
+          CREATE OR REPLACE TABLE {{render(vars.staging_table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            );
+      - id: green_update_unique_id_and_filename
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+        sql: |-
+          
+          UPDATE {{render(vars.staging_table)}}
+          SET 
+            unique_row_id = md5(
+              COALESCE(CAST(VendorID AS text), '') ||
+              COALESCE(CAST(lpep_pickup_datetime AS text), '') || 
+              COALESCE(CAST(lpep_dropoff_datetime AS text), '') || 
+              COALESCE(CAST(PULocationID AS text), '') || 
+              COALESCE(CAST(DOLocationID AS text), '') || 
+              COALESCE(CAST(fare_amount AS text), '') || 
+              COALESCE(CAST(trip_distance AS text), '')      
+            ),
+            filename = '{{render(vars.file)}}';
+
+      - id: green_merge_data
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+        sql: |-
+
+          CREATE TABLE IF NOT EXISTS {{render(vars.table)}} AS
+            SELECT * FROM (
+              FROM (VALUES(NULL::VARCHAR, NULL::TEXT)) t(unique_row_id, filename)
+              WHERE FALSE
+              UNION ALL BY NAME
+              FROM read_parquet('{{render(vars.url)}}')
+            ) LIMIT 0;
+
+          INSERT INTO {{render(vars.table)}}
+          SELECT s.*
+          FROM {{render(vars.staging_table)}} s
+          LEFT JOIN {{render(vars.table)}} t
+          ON s.unique_row_id = t.unique_row_id
+          WHERE t.unique_row_id IS NULL;
+
+triggers:
+  - id: green_schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 1 * *"
+    inputs:
+      taxi: green
+
+  - id: yellow_schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 10 1 * *"
+    inputs:
+      taxi: yellow
