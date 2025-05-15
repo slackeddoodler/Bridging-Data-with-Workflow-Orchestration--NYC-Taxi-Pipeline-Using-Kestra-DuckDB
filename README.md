@@ -110,14 +110,32 @@ This manual workflow handles the ingestion of Parquet files, schema creation usi
 
 This scheduled workflow, using Kestra's backfill feature, handles the ingestion of both new and historical data into MotherDuck. It ensures that when new data is available or a gap in data occurs, the process runs automatically without requiring manual intervention.
 
+
 ---
 
 ## ⚙️ MotherDuck Integration Notes
 
-For using the **MotherDuck** feature, the following steps are required:
+For using the **MotherDuck** workflows, the following steps are required:
 
 1. **Create a MotherDuck Account**:
    Sign up for an account at [MotherDuck](https://www.motherduck.com) and generate an **Access Token**.
+
+2. **Create a Database**:
+   Create a new database within your MotherDuck account and replace `nyc_taxi` with your database name in all the instances of the `url` property in both workflows.
+   
+   For example, replace:
+   ```
+   - id: yellow_create_staging_table
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:nyc_taxi?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+   ```
+   with:
+   ```
+   - id: yellow_create_staging_table
+        type: io.kestra.plugin.jdbc.duckdb.Query
+        url: "jdbc:duckdb:md:your_database_name?motherduck_token={{ secret('MOTHERDUCK_TOKEN') }}"
+   ```
+   Or you can create a database with the name `nyc_taxi`.
 
 2. **Create a `.env-encoded` File**:
    Inside the folder that contains the **Kestra Docker Compose YAML file**, create a `.env-encoded` file and add the following line:
